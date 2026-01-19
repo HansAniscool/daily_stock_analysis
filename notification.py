@@ -148,7 +148,7 @@ class NotificationService:
         
         # 消息长度限制（字节）
         self._feishu_max_bytes = getattr(config, 'feishu_max_bytes', 20000)
-        self._wechat_max_bytes = getattr(config, 'wechat_max_bytes', 4000)
+        self._wechat_max_bytes = getattr(config, 'wechat_max_bytes', 2000)
         
         # 检测所有已配置的渠道
         self._available_channels = self._detect_all_channels()
