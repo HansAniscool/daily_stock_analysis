@@ -1062,104 +1062,70 @@ class NotificationService:
             logger.error(f"发送企业微信消息失败: {e}")
             return False
     
-    def _send_wechat_chunked(self, content: str, max_bytes: int) -> bool:
-        """
-        分批发送长消息到企业微信
+def _send_wechat_chunked(self, content: str, max_bytes: int) -> bool:
+    """
+    分批发送长消息到企业微信
+    
+    按 \n---\n 严格分割，每个分隔部分单独发送
+    
+    Args:
+        content: 完整消息内容
+        max_bytes: 单条消息最大字节数
         
-        按股票分析块（以 --- 或 ### 分隔）智能分割，确保每批不超过限制
+    Returns:
+        是否全部发送成功
+    """
+    import time
+    
+    def get_bytes(s: str) -> int:
+        """获取字符串的 UTF-8 字节数"""
+        return len(s.encode('utf-8'))
+    
+    # 严格按 "\n---\n" 分割
+    sections = content.split("\n---\n")
+    
+    # 处理每个 section，确保不超过长度限制
+    chunks = []
+    for section in sections:
+        section_bytes = get_bytes(section)
         
-        Args:
-            content: 完整消息内容
-            max_bytes: 单条消息最大字节数
-            
-        Returns:
-            是否全部发送成功
-        """
-        import time
-        
-        def get_bytes(s: str) -> int:
-            """获取字符串的 UTF-8 字节数"""
-            return len(s.encode('utf-8'))
-        
-        # 智能分割：优先按 "---" 分隔（股票之间的分隔线）
-        # 如果没有分隔线，按 "### " 标题分割（每只股票的标题）
-        if "\n---\n" in content:
-            sections = content.split("\n---\n")
-            separator = "\n---\n"
-        elif "\n### " in content:
-            # 按 ### 分割，但保留 ### 前缀
-            parts = content.split("\n### ")
-            sections = [parts[0]] + [f"### {p}" for p in parts[1:]]
-            separator = "\n"
+        # 如果单个 section 超长，需要截断
+        if section_bytes > max_bytes:
+            truncated = self._truncate_to_bytes(section, max_bytes - 200)
+            truncated += "\n\n...(本段内容过长已截断)"
+            chunks.append(truncated)
         else:
-            # 无法智能分割，按字符强制分割
-            return self._send_wechat_force_chunked(content, max_bytes)
+            chunks.append(section)
+    
+    # 分批发送
+    total_chunks = len(chunks)
+    success_count = 0
+    
+    logger.info(f"企业微信分批发送：共 {total_chunks} 批")
+    
+    for i, chunk in enumerate(chunks):
+        # 添加分页标记
+        if total_chunks > 1:
+            page_marker = f"\n\n📄 *({i+1}/{total_chunks})*"
+            chunk_with_marker = chunk + page_marker
+        else:
+            chunk_with_marker = chunk
         
-        chunks = []
-        current_chunk = []
-        current_bytes = 0
-        separator_bytes = get_bytes(separator)
-        
-        for section in sections:
-            section_bytes = get_bytes(section) + separator_bytes
-            
-            # 如果单个 section 就超长，需要强制截断
-            if section_bytes > max_bytes:
-                # 先发送当前积累的内容
-                if current_chunk:
-                    chunks.append(separator.join(current_chunk))
-                    current_chunk = []
-                    current_bytes = 0
-                
-                # 强制截断这个超长 section（按字节截断）
-                truncated = self._truncate_to_bytes(section, max_bytes - 200)
-                truncated += "\n\n...(本段内容过长已截断)"
-                chunks.append(truncated)
-                continue
-            
-            # 检查加入后是否超长
-            if current_bytes + section_bytes > max_bytes:
-                # 保存当前块，开始新块
-                if current_chunk:
-                    chunks.append(separator.join(current_chunk))
-                current_chunk = [section]
-                current_bytes = section_bytes
+        try:
+            if self._send_wechat_message(chunk_with_marker):
+                success_count += 1
+                logger.info(f"企业微信第 {i+1}/{total_chunks} 批发送成功")
             else:
-                current_chunk.append(section)
-                current_bytes += section_bytes
+                logger.error(f"企业微信第 {i+1}/{total_chunks} 批发送失败")
+        except Exception as e:
+            logger.error(f"企业微信第 {i+1}/{total_chunks} 批发送异常: {e}")
         
-        # 添加最后一块
-        if current_chunk:
-            chunks.append(separator.join(current_chunk))
-        
-        # 分批发送
-        total_chunks = len(chunks)
-        success_count = 0
-        
-        logger.info(f"企业微信分批发送：共 {total_chunks} 批")
-        
-        for i, chunk in enumerate(chunks):
-            # 添加分页标记
-            if total_chunks > 1:
-                page_marker = f"\n\n📄 *({i+1}/{total_chunks})*"
-                chunk_with_marker = chunk + page_marker
-            else:
-                chunk_with_marker = chunk
-            
-            try:
-                if self._send_wechat_message(chunk_with_marker):
-                    success_count += 1
-                    logger.info(f"企业微信第 {i+1}/{total_chunks} 批发送成功")
-                else:
-                    logger.error(f"企业微信第 {i+1}/{total_chunks} 批发送失败")
-            except Exception as e:
-                logger.error(f"企业微信第 {i+1}/{total_chunks} 批发送异常: {e}")
-            
-            # 批次间隔，避免触发频率限制
-            if i < total_chunks - 1:
-                time.sleep(1)
-        
-        return success_count == total_chunks
+        # 批次间隔，避免触发频率限制
+        if i < total_chunks - 1:
+            time.sleep(1)
+    
+    return success_count == total_chunks
+
     
     def _send_wechat_force_chunked(self, content: str, max_bytes: int) -> bool:
         """
