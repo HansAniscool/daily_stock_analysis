@@ -836,9 +836,9 @@ class NotificationService:
         content = "\n".join(lines)
         
         # 检查长度
-        if len(content) > 1800:
+        if len(content) > 3800:
             logger.warning(f"仪表盘超长({len(content)}字符)，截断")
-            content = content[:1800] + "\n...(已截断)"
+            content = content[:3800] + "\n...(已截断)"
         
         return content
     
@@ -2504,7 +2504,7 @@ def send_daily_report(results: List[AnalysisResult]) -> bool:
     service = get_notification_service()
     
     # 生成报告
-    report = service.generate_daily_report(results)
+    report = service.generate_wechat_dashboard(results)
     
     # 保存到本地
     service.save_report_to_file(report)
